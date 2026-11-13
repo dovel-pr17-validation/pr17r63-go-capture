@@ -1,0 +1,4 @@
+continue-on-failure = true
+
+[headers]
+Authorization = "Bearer ${API_SECRET}"

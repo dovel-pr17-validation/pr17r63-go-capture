@@ -1,0 +1,57 @@
+name: Contract
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Build and Run Server
+        env:
+          API_SECRET: hardcoded_secret
+          GIN_MODE: release
+        run: |
+          go build -o capture ./cmd/capture
+          ./capture > capture.log 2>&1 &
+          # Wait until the server answers instead of sleeping a fixed time
+          for _ in $(seq 1 30); do
+            if curl -sf http://localhost:59232/health > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Server did not become healthy within 30s"
+          cat capture.log
+          exit 1
+
+      - name: Run Schemathesis Tests
+        uses: schemathesis/action@b0cacf86f25caaa79ac110cc2077afd70fdd67ff # v3.1.0
+        with:
+          schema: './openapi.yml'
+          base-url: 'http://localhost:59232'
+          # Pinned so a new Schemathesis release cannot fail PRs that did not change the API
+          version: '4.32.7'
+          config-file: 'schemathesis.toml'
+          coverage-pr-comment: 'false'
+        env:
+          API_SECRET: hardcoded_secret
